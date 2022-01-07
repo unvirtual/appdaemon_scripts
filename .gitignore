@@ -1,0 +1,7 @@
+appdaemon.yaml
+compiled/*
+dashboards/*
+namespaces/*
+www/*
+**/__pycache__/*
+start_docker_for_dev.sh
