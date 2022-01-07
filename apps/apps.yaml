@@ -1,0 +1,121 @@
+smart_heating:
+  module: smart_heating
+  class: SmartHeating
+  schedules:
+    schedule_default_week:
+      - start: "05:00"
+        end: "08:00"
+        weekdays: "1-5"  # Mon - Fri
+        setmode: comfort
+      - start: "14:00"
+        end: "22:30"
+        weekdays: "1-4"  # Mon - Thu
+        setmode: comfort
+      - start: "14:00"
+        end: "23:30"
+        weekdays: "5"  # Fri
+        setmode: comfort
+      - start: "06:00"
+        end: "23:30"
+        weekdays: "6"  # Sat
+        setmode: comfort
+      - start: "06:00"
+        end: "22:30"
+        weekdays: "7"  # Sun
+        setmode: comfort
+    schedule_default_week_children:
+      - start: "05:00"
+        end: "08:00"
+        weekdays: "1-5"  # Mon - Fri
+        setmode: comfort
+      - start: "14:00"
+        end: "20:00"
+        weekdays: "1-5"  # Mon - Thu
+        setmode: comfort
+      - start: "06:00"
+        end: "20:00"
+        weekdays: "6-7"  # Sat
+        setmode: comfort
+    schedule_at_home_week:
+      - start: "06:00"
+        end: "23:30"
+        setmode: comfort
+    schedule_at_home_week_children:
+      - start: "06:00"
+        end: "20:00"
+        setmode: comfort
+    schedule_away_week:
+      - start: "00:00"
+        end: "23:59"
+        setmode: eco
+    schedule_default_bedroom:
+      - start: "05:00"
+        end: "08:00"
+        weekdays: "1-7"  # Mon - Sun
+        setmode: comfort
+      - start: "17:00"
+        end: "20:00"
+        weekdays: "1-7"  # Mon - Sun
+        setmode: comfort
+    schedule_default_office:
+      - start: "16:00"
+        end: "22:30"
+        weekdays: "1-5"  # Mon - Fri
+        setmode: comfort
+      - start: "07:00"
+        end: "23:30"
+        weekdays: "6"  # Sat
+        setmode: comfort
+      - start: "07:00"
+        end: "22:30"
+        weekdays: "7"  # Sun
+        setmode: comfort
+    schedule_home_office:
+      - start: "06:30"
+        end: "22:30"
+        weekdays: "1-5"  # Mon - Fri
+        setmode: comfort
+
+  rooms:
+    living:
+      thermostats:
+        - climate.livingroom_thermostat_1
+        - climate.livingroom_thermostat_2
+        - climate.livingroom_thermostat_3
+      default_schedule: schedule_default_week
+      conditional_schedules:
+        - type: input_select
+          entity_id: input_select.heating_control
+          values:
+            family_at_home: schedule_at_home_week
+            family_away: schedule_away_week
+    children:
+      thermostats:
+        - climate.nursery_thermostat
+      default_schedule: schedule_default_week_children
+      conditional_schedules:
+        - type: input_select
+          entity_id: input_select.heating_control
+          values:
+            family_at_home: schedule_at_home_week_children
+            family_away: schedule_away_week
+    office:
+      thermostats:
+        - climate.office_thermostat
+      default_schedule: schedule_away_week
+      conditional_schedules:
+        - type: input_select
+          entity_id: input_select.heating_control
+          values:
+            family_at_home: schedule_at_home_week
+            home_office: schedule_home_office
+            family_away: schedule_away_week
+    bedroom:
+      thermostats:
+        - climate.bedroom_thermostat
+      default_schedule: schedule_default_bedroom
+      conditional_schedules:
+        - type: input_select
+          entity_id: input_select.heating_control
+          values:
+            family_away: schedule_away_week
