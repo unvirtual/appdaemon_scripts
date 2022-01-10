@@ -68,25 +68,87 @@ class Schedule:
 
 @define
 class Thermostat:
+    hass: hass
     entity_id: str
+    alpha: float = field(default=0.)
+    offset: float = field(default=0.)
 
-    def set_mode(self, hass, mode):
-        hass.log(">>>> Thermostat: Setting mode of " + self.entity_id + " to: " + mode)
-        hass.call_service("climate/set_preset_mode", entity_id=self.entity_id, preset_mode=mode)
-        
+    MAX_TEMP_SETTING = 26.0
+
+    def get_temperature_setting(self):
+        entity = self.hass.get_entity(self.entity_id)
+        return entity.get_state(attribute="temperature")
+
+    def set_temperature(self, target_temperature, current_temperature, force=False):
+        delta = target_temperature - current_temperature
+        new_temperature = round((target_temperature + self.alpha*delta + self.offset)*2.)/2.
+        if new_temperature > Thermostat.MAX_TEMP_SETTING:
+            new_temperature = Thermostat.MAX_TEMP_SETTING
+        new_temperature = max(new_temperature, target_temperature)
+        current_setting = self.get_temperature_setting()
+        if force or new_temperature != current_setting:
+            self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force))
+            self.hass.call_service("climate/set_temperature", entity_id=self.entity_id, temperature=new_temperature)
+        else:
+            self.hass.log("[Thermostat] No setting change (setting: {}, target: {})".format(current_setting, target_temperature))
+
 @define
 class Selector:
     entity_id: str
     states: Union[dict[str, Schedule], Schedule]
 
 ROOM_UPDATED="on_manual_change"
+TEMPERATURE_SENSOR_UPDATED="smart_heating_temperature_sensor_updated"
+
+@define
+class TemperatureSensor:
+    hass: hass
+    entity_id: str
+    last_value_time: Optional[datetime.datetime] = field(init=False)
+    last_value: Optional[float] = field(init=False)
+    threshold: float = field(default=0.0)
+
+    def __attrs_post_init__(self):
+        entity = self.hass.get_entity(self.entity_id)
+        if entity is None:
+            raise ValueError("Temperature sensor " + entity_id + " not found in HASS")
+        self.last_value = self.measure_temperature()
+        self.last_value_time = self.hass.get_now()
+        entity.listen_state(self.on_change)
+
+    def measure_temperature(self):
+        return self._valid_temperature_or_none(self.hass.get_state(self.entity_id))
+
+    def last_temperature(self):
+        return self.last_value
+        
+    def last_temperature_time(self):
+        return self.last_value_time
+
+    def _valid_temperature_or_none(self, value):
+        return float(value) if value != "unknown" else None
+
+    def on_change(self, entity, attribute, old, new, kwargs):
+        self.hass.log("[TempSensor] {} temperature {} -> {}".format(self.entity_id, old, new))
+        new_temp = self._valid_temperature_or_none(new)
+        changed_from_to_none = new_temp != self.last_value and (new_temp is None or self.last_value is None) 
+        if changed_from_to_none or abs(new_temp - self.last_value) > self.threshold:
+            self.last_value = new_temp
+            self.last_value_time = self.hass.get_now()
+            self.hass.fire_event(TEMPERATURE_SENSOR_UPDATED, entity_id=self.entity_id, temperature=self.last_value)
+
+    @classmethod
+    def create(cls, hass, entity_id):
+        return cls(hass=hass, entity_id=entity_id)
 
 @define
 class Room:
     hass: hass
     name: str
-    thermostats: list[str]
+    thermostats: list[Thermostat]
     default_schedule: Schedule
+    temperature_sensors: list[TemperatureSensor]
+    handles: list[Any] = field(default=[])
     overrides: list[str] = field(default=[])
     conditionals: list[Any] = field(default=[])
     default_mode: str = field(default="eco")
@@ -94,33 +156,132 @@ class Room:
 
     def __attrs_post_init__(self):
         self._current_schedule = self.default_schedule
-        self.set_all_conditionals_from_hass()
+        self.hass.listen_event(self.on_temperature_changed, TEMPERATURE_SENSOR_UPDATED)
+        for t in self.thermostats:
+            entity = self.hass.get_entity(t.entity_id)
+            entity.listen_state(self.on_preset_mode_change, attribute="preset_mode")
+
         for i in self.conditionals:
             entity_id = i.get("entity_id")
             entity = self.hass.get_entity(entity_id)
             entity.listen_state(self.on_conditional_changed)
 
-    def conditional_schedule(self, entity_id, value):
-        for c in self.conditionals:
-            if c["entity_id"] == entity_id and value in c["values"]:
-                return c["values"][value]
-        return None
+        self.update_schedule(force=True)
 
-    def set_all_conditionals_from_hass(self):
-        for c in self.conditionals:
-            state = self.hass.get_state(c["entity_id"])
-            self.set_conditional(c["entity_id"], state)
+        self.hass.log("==================== ")
+        self.hass.log("Room {} initialized:".format(self.name))
+        self.hass.log("  current room temperature: {}".format(self.get_room_temperature()))
+        self.hass.log("  current schedule:         {}".format(self._current_schedule.name))
+        self.hass.log("  current mode:             {}".format(self.get_current_mode()))
+        self.hass.log("==================== ")
 
-    def set_conditional(self, entity_id, value):
-        c_sched = self.conditional_schedule(entity_id, value) or self.default_schedule
-        if c_sched != self._current_schedule:
-            self._current_schedule = c_sched
-            self.hass.fire_event(ROOM_UPDATED, room=self.name)
+    def on_preset_mode_change(self, entity, attribute, old, new, kwargs):
+        if entity not in [x.entity_id for x in self.thermostats]:
+            return
+        if new is not None:
+            self.hass.log("room {} resetting mode to manual for thermostat {}".format(self.name, entity))
+            self.update_temperature(force=True)
+
+    def get_room_temperature(self):
+        temps = list(filter(lambda x: x is not None, [y.last_temperature() for y in self.temperature_sensors]))
+        if len(temps) == 0:
+            self.hass.log(
+                "{}: all (n={}) temperature sensors return no values. Using thermostat temperature.".format(self.name, len(self.temperature_sensors)), 
+                level="WARNING"
+            )
+            return self.hass.get_state(self.thermostats[0].entity_id, attribute="current_temperature")
+        elif len(temps) < len(self.temperature_sensors):
+            self.hass.log(
+                "{}: some temperature sensors return no values. Using arbitrary temperature sensor.".format(self.name), 
+                level="WARNING"
+            )
+            return temps[0]
+        else:
+            return sum(temps)/len(temps)
+
+    def on_temperature_changed(self, event_name, data, kwargs):
+        if data["entity_id"] in [x.entity_id for x in self.temperature_sensors]:
+            self.update_temperature()
 
     def on_conditional_changed(self, entity, attribute, old, new, kwargs):
+        self.hass.log("Room {}: condition {} changed from {} to {}".format(self.name, entity, old, new))
         if new == old:
             return
-        self.set_conditional(entity, new)
+        updated = self.update_schedule()
+        if updated:
+            self.hass.log("Room {}: condition change triggered new schedule {}".format(self.name, self._current_schedule.name))
+        else:
+            self.hass.log("Room {}: condition change without schedule change".format(self.name))
+
+    def get_conditional_state(self):
+        res = []
+        for c in self.conditionals:
+            state = self.hass.get_state(c["entity_id"])
+            if state in c["values"]:
+                res.append({"entity_id": c["entity_id"], "state": state, "schedule": c["values"][state]})
+        return res
+
+    def conditional_schedule(self):
+        schedule = None
+        c_states = self.get_conditional_state()
+        # assume only one element for now
+        if len(c_states) > 0:
+            schedule = c_states[0]["schedule"]
+        return schedule
+
+    def update_schedule(self, force=False):
+        c_schedule = self.conditional_schedule() 
+        c_schedule = c_schedule if c_schedule is not None else self.default_schedule
+        if c_schedule != self._current_schedule or force:
+            self._current_schedule = c_schedule
+            self.cancel_scheduled_events()
+            self.schedule_events()
+            self.update_temperature(force=force)
+            return True
+        return False
+
+    def get_current_mode(self, add_offset_seconds=0):
+        scheduled = self._current_schedule.get_item_at_datetime(
+            self.hass.get_now() + datetime.timedelta(seconds=add_offset_seconds)
+        )
+        return scheduled.setmode if scheduled is not None else DEFAULT_SETMODE
+
+    def update_temperature(self, add_offset_seconds=0, force=False):
+        mode = self.get_current_mode(add_offset_seconds)
+        mode_temps = {"comfort": 21, "eco": 18}
+        for t in self.thermostats:
+            t.set_temperature(mode_temps[mode], self.get_room_temperature(), force=force)
+        self.hass.set_state("sensor.target_temperature_" + self.name, state=mode_temps[mode])
+
+    def cancel_scheduled_events(self):
+        self.hass.log("Cancelling schedule for room {}".format(self.name), level="DEBUG")
+        for handle in self.handles:
+            self.hass.cancel_timer(handle)
+        self.handles = []
+
+    def schedule_events(self):
+        self.hass.log("Room {}: scheduling events for schedule {}".format(self.name, self._current_schedule.name), level="DEBUG")
+        for item in self._current_schedule.items:
+            self.handles.append(
+                self.hass.run_daily(
+                    self.set_mode_callback, 
+                    item.start, 
+                    setmode=item.setmode, 
+                    constrain_days=weekday_str_from_list(item.weekdays)
+                )
+            )
+            self.handles.append(
+                self.hass.run_daily(
+                    self.set_mode_callback, 
+                    item.end, 
+                    setmode=DEFAULT_SETMODE,
+                    constrain_days=weekday_str_from_list(item.weekdays)
+                )
+            )
+
+    def set_mode_callback(self, kwargs):
+        self.hass.log("Callback: " + str(self.get_now()) + ": Setting mode for " + kwargs["room"] + " to " + kwargs["setmode"])
+        self.update(add_offset_seconds=10)
 
     @classmethod
     def replace_conditional_schedules(cls, conditionals, schedules):
@@ -138,34 +299,18 @@ class Room:
         return cls(
             hass=hass,
             name=name,
-            thermostats=[Thermostat(entity_id=eid) for eid in dct["thermostats"]],
+            thermostats=[Thermostat(hass=hass, **e) for e in dct["thermostats"]],
             default_schedule=schedules[dct["default_schedule"]],
+            temperature_sensors=[TemperatureSensor.create(hass, e) for e in dct["temperature_sensors"]] ,
             conditionals=conditionals
         )
 
-    def set_mode(self, mode):
-        self.hass.log(">> Room: Setting mode in " + self.name + " to " + mode)
-        for t in self.thermostats:
-            t.set_mode(self.hass, mode)
-
-    def current_schedule(self):
-        return self._current_schedule
-
-    def set_currently_scheduled_mode(self, add_offset_seconds=0):
-        scheduled = self._current_schedule.get_item_at_datetime(
-            self.hass.get_now() + datetime.timedelta(seconds=add_offset_seconds)
-        )
-        mode = scheduled.setmode if scheduled is not None else DEFAULT_SETMODE
-        self.set_mode(mode)
 
 class SmartHeating(hass.Hass):
     def initialize(self):
         self.log("SmartHeating started")
         self.schedules = {}
         self.rooms = {}
-        self.handles = {}
-
-        self.listen_event(self.room_updated, ROOM_UPDATED)
 
         for k,v in self.args["schedules"].items():
             s = Schedule.from_list(k, v)
@@ -173,68 +318,3 @@ class SmartHeating(hass.Hass):
         for k,v in self.args["rooms"].items():
             r = Room.from_dict(self, k, v, self.schedules)
             self.rooms[r.name] = r
-            r.set_currently_scheduled_mode()
-        for k,v in self.rooms.items():
-            self.set_room_schedule(v)
-
-    def room_updated(self, event_name, data, kwargs):
-        room = self.rooms[data["room"]]
-        self.log("App received update for room " + room.name)
-        self.cancel_room_schedule(room.name)
-        room.set_currently_scheduled_mode()
-        self.set_room_schedule(room)
-        self.log("Currently selected schedules: ")
-        for k,v in self.rooms.items():
-            self.log(k + ": " + v._current_schedule.name)
-
-    def cancel_room_schedule(self, room_name):
-        self.log("Cancelling schedule for room " + room_name)
-        if room_name not in self.handles:
-            self.log("No schedule found")
-            return
-        for handle in self.handles[room_name]:
-            self.cancel_timer(handle)
-        self.handles[room_name] = []
-
-    def cancel_schedules(self):
-        for room_name in self.rooms.keys():
-            self.cancel_room_schedule(room_name)
-
-    def print_scheduled_events(self, room_name):
-        self.log("Timers set for room: " + room_name)
-        for i in self.handles[room_name]:
-            res = self.info_timer(i)
-            if res is not None:
-                self.log(str(res))
-            else:
-                self.log("No timers set")
-
-    def set_room_schedule(self, room):
-        sched = room.current_schedule()
-        self.log("Setting schedule " + sched.name + " for room " + room.name)
-        self.handles[room.name] = []
-
-        for item in sched.items:
-            self.handles[room.name].append(
-                self.run_daily(self.set_mode_callback, 
-                               item.start, 
-                               setmode=item.setmode, 
-                               room=room.name,
-                               constrain_days=weekday_str_from_list(item.weekdays)
-                )
-            )
-            self.handles[room.name].append(
-                self.run_daily(self.set_mode_callback, 
-                               item.end, 
-                               setmode=DEFAULT_SETMODE,
-                               room=room.name,
-                               constrain_days=weekday_str_from_list(item.weekdays)
-                )
-            )
-
-    def set_mode_callback(self, kwargs):
-        self.log("Callback: " + str(self.get_now()) + ": Setting mode for " + kwargs["room"] + " to " + kwargs["setmode"])
-        self.rooms[kwargs["room"]].set_currently_scheduled_mode(add_offset_seconds=10)
-
-
-

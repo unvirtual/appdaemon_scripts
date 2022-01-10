@@ -1,6 +1,9 @@
 smart_heating:
   module: smart_heating
   class: SmartHeating
+  default_modes:
+    comfort: 21
+    eco: 17
   schedules:
     schedule_default_week:
       - start: "05:00"
@@ -79,9 +82,17 @@ smart_heating:
   rooms:
     living:
       thermostats:
-        - climate.livingroom_thermostat_1
-        - climate.livingroom_thermostat_2
-        - climate.livingroom_thermostat_3
+        - entity_id: climate.livingroom_thermostat_1
+          alpha: 0.7
+          offset: 0
+        - entity_id: climate.livingroom_thermostat_2
+          alpha: 1.5
+          offset: 0
+        - entity_id: climate.livingroom_thermostat_3
+          alpha: 0.7
+          offset: 0
+      temperature_sensors:
+        - sensor.sensor_climate_living_room_temperature
       default_schedule: schedule_default_week
       conditional_schedules:
         - type: input_select
@@ -91,7 +102,11 @@ smart_heating:
             family_away: schedule_away_week
     children:
       thermostats:
-        - climate.nursery_thermostat
+        - entity_id: climate.nursery_thermostat
+          alpha: 2
+          offset: 0
+      temperature_sensors:
+        - sensor.sensor_climate_childroom_temperature
       default_schedule: schedule_default_week_children
       conditional_schedules:
         - type: input_select
@@ -101,7 +116,11 @@ smart_heating:
             family_away: schedule_away_week
     office:
       thermostats:
-        - climate.office_thermostat
+        - entity_id: climate.office_thermostat
+          alpha: 1.5
+          offset: 0
+      temperature_sensors:
+        - sensor.sensor_climate_office_temperature
       default_schedule: schedule_away_week
       conditional_schedules:
         - type: input_select
@@ -112,7 +131,11 @@ smart_heating:
             family_away: schedule_away_week
     bedroom:
       thermostats:
-        - climate.bedroom_thermostat
+        - entity_id: climate.bedroom_thermostat
+          alpha: 0
+          offset: 0
+      temperature_sensors:
+        - sensor.sensor_climate_bedroom_temperature
       default_schedule: schedule_default_bedroom
       conditional_schedules:
         - type: input_select
