@@ -3,7 +3,7 @@ smart_heating:
   class: SmartHeating
   default_modes:
     comfort: 21
-    eco: 17
+    eco: 18
   schedules:
     schedule_default_week:
       - start: "05:00"
@@ -137,6 +137,9 @@ smart_heating:
       temperature_sensors:
         - sensor.sensor_climate_bedroom_temperature
       default_schedule: schedule_default_bedroom
+      modes:
+        comfort: 24
+        eco: 19
       conditional_schedules:
         - type: input_select
           entity_id: input_select.heating_control
