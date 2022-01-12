@@ -73,31 +73,40 @@ class Thermostat:
     alpha: float = field(default=0.)
     offset: float = field(default=0.)
 
-    MAX_TEMP_SETTING = 26.0
+    MAX_TEMP_SETTING = 28.0
 
     def get_temperature_setting(self):
         entity = self.hass.get_entity(self.entity_id)
         return entity.get_state(attribute="temperature")
 
+    def get_measured_temperature(self):
+        entity = self.hass.get_entity(self.entity_id)
+        return entity.get_state(attribute="current_temperature")
+
     def set_temperature(self, target_temperature, current_temperature, force=False):
         delta = target_temperature - current_temperature
-        new_temperature = round((target_temperature + self.alpha*delta + self.offset)*2.)/2.
+        
+        current_measurement = self.get_measured_temperature()
+        new_temperature = round((current_measurement + self.alpha*delta + self.offset)*2.)/2.
+
+        new_temperature = max(new_temperature, target_temperature)
         if new_temperature > Thermostat.MAX_TEMP_SETTING:
             new_temperature = Thermostat.MAX_TEMP_SETTING
-        new_temperature = max(new_temperature, target_temperature)
+
         current_setting = self.get_temperature_setting()
+
         if force or new_temperature != current_setting:
             self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force))
             self.hass.call_service("climate/set_temperature", entity_id=self.entity_id, temperature=new_temperature)
         else:
             self.hass.log("[Thermostat] No setting change (setting: {}, target: {})".format(current_setting, target_temperature))
+        self.hass.log("[Thermostat] {}: temp delta (power output) {}".format(self.entity_id, new_temperature - current_measurement))
 
 @define
 class Selector:
     entity_id: str
     states: Union[dict[str, Schedule], Schedule]
 
-ROOM_UPDATED="on_manual_change"
 TEMPERATURE_SENSOR_UPDATED="smart_heating_temperature_sensor_updated"
 
 @define
@@ -126,7 +135,10 @@ class TemperatureSensor:
         return self.last_value_time
 
     def _valid_temperature_or_none(self, value):
-        return float(value) if value != "unknown" else None
+        try:
+            return float(value) 
+        except ValueError:
+            return None
 
     def on_change(self, entity, attribute, old, new, kwargs):
         self.hass.log("[TempSensor] {} temperature {} -> {}".format(self.entity_id, old, new))

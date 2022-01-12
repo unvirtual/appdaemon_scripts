@@ -132,14 +132,14 @@ smart_heating:
     bedroom:
       thermostats:
         - entity_id: climate.bedroom_thermostat
-          alpha: 0
+          alpha: 1
           offset: 0
       temperature_sensors:
         - sensor.sensor_climate_bedroom_temperature
       default_schedule: schedule_default_bedroom
       modes:
-        comfort: 24
-        eco: 19
+        comfort: 21
+        eco: 18
       conditional_schedules:
         - type: input_select
           entity_id: input_select.heating_control
