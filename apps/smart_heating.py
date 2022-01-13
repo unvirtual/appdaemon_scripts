@@ -85,13 +85,12 @@ class Thermostat:
 
     def set_temperature(self, target_temperature, current_temperature, force=False):
         delta = target_temperature - current_temperature
-        
-        current_measurement = self.get_measured_temperature()
-        new_temperature = round((current_measurement + self.alpha*delta + self.offset)*2.)/2.
+        new_temperature = target_temperature
 
-        new_temperature = max(new_temperature, target_temperature)
-        if new_temperature > Thermostat.MAX_TEMP_SETTING:
-            new_temperature = Thermostat.MAX_TEMP_SETTING
+        current_measurement = self.get_measured_temperature()
+        if delta > 0:
+            new_temperature = round((current_measurement + self.alpha*delta + self.offset)*2.)/2.
+            new_temperature = min(max(new_temperature, target_temperature), Thermostat.MAX_TEMP_SETTING)
 
         current_setting = self.get_temperature_setting()
 
@@ -99,8 +98,8 @@ class Thermostat:
             self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force))
             self.hass.call_service("climate/set_temperature", entity_id=self.entity_id, temperature=new_temperature)
         else:
-            self.hass.log("[Thermostat] No setting change (setting: {}, target: {})".format(current_setting, target_temperature))
-        self.hass.log("[Thermostat] {}: temp delta (power output) {}".format(self.entity_id, new_temperature - current_measurement))
+            self.hass.log("[Thermostat] {}: No setting change (setting: {}, target: {})".format(self.entity_id, current_setting, target_temperature))
+        self.hass.log("[Thermostat] {}: temp delta (power output) {} (room temp: {}, new temp: {}, thermostat temp: {})".format(self.entity_id, new_temperature - current_measurement, current_temperature, new_temperature, current_measurement))
 
 @define
 class Selector:
@@ -169,10 +168,11 @@ class Room:
 
     def __attrs_post_init__(self):
         self._current_schedule = self.default_schedule
-        self.hass.listen_event(self.on_temperature_changed, TEMPERATURE_SENSOR_UPDATED)
+        self.hass.listen_event(self.on_sensor_temperature_changed, TEMPERATURE_SENSOR_UPDATED)
         for t in self.thermostats:
             entity = self.hass.get_entity(t.entity_id)
             entity.listen_state(self.on_preset_mode_change, attribute="preset_mode")
+            entity.listen_state(self.on_thermostat_temperature_changed, attribute="current_temperature")
 
         for i in self.conditionals:
             entity_id = i.get("entity_id")
@@ -214,8 +214,14 @@ class Room:
         else:
             return sum(temps)/len(temps)
 
-    def on_temperature_changed(self, event_name, data, kwargs):
+    def on_sensor_temperature_changed(self, event_name, data, kwargs):
         if data["entity_id"] in [x.entity_id for x in self.temperature_sensors]:
+            self.hass.log("Room {} on_sensor_temperature_changed() updates thermostats", level="DEBUG")
+            self.update_thermostats()
+
+    def on_thermostat_temperature_changed(self, entity, attribute, old, new, kwargs):
+        if entity in [x.entity_id for x in self.thermostats]:
+            self.hass.log("Room {} on_thermostat_temperature_changed() updates thermostats", level="DEBUG")
             self.update_thermostats()
 
     def on_conditional_changed(self, entity, attribute, old, new, kwargs):
