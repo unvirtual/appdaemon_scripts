@@ -65,22 +65,23 @@ smart_heating:
         end: "22:30"
         weekdays: "1-5"  # Mon - Fri
         setmode: comfort
-      - start: "07:00"
-        end: "23:30"
-        weekdays: "6"  # Sat
-        setmode: comfort
-      - start: "07:00"
-        end: "22:30"
-        weekdays: "7"  # Sun
-        setmode: comfort
+          #      - start: "07:00"
+          #        end: "23:30"
+          #        weekdays: "6"  # Sat
+          #        setmode: comfort
+          #      - start: "07:00"
+          #        end: "22:30"
+          #        weekdays: "7"  # Sun
+          #        setmode: comfort
     schedule_home_office:
       - start: "06:30"
-        end: "22:30"
+        end: "18:30"
         weekdays: "1-5"  # Mon - Fri
         setmode: comfort
 
   rooms:
     living:
+      control: climate.living_room
       thermostats:
         - entity_id: climate.livingroom_thermostat_1
           alpha: 0.7
@@ -94,6 +95,9 @@ smart_heating:
       temperature_sensors:
         - sensor.sensor_climate_living_room_temperature
       default_schedule: schedule_default_week
+      modes:
+        comfort: 20.5
+        eco: 18
       conditional_schedules:
         - type: input_select
           entity_id: input_select.heating_control
@@ -101,6 +105,7 @@ smart_heating:
             family_at_home: schedule_at_home_week
             family_away: schedule_away_week
     children:
+      control: climate.childroom
       thermostats:
         - entity_id: climate.nursery_thermostat
           alpha: 2
@@ -108,6 +113,9 @@ smart_heating:
       temperature_sensors:
         - sensor.sensor_climate_childroom_temperature
       default_schedule: schedule_default_week_children
+      modes:
+        comfort: 20.5
+        eco: 18
       conditional_schedules:
         - type: input_select
           entity_id: input_select.heating_control
@@ -115,6 +123,7 @@ smart_heating:
             family_at_home: schedule_at_home_week_children
             family_away: schedule_away_week
     office:
+      control: climate.office
       thermostats:
         - entity_id: climate.office_thermostat
           alpha: 1.5
@@ -122,6 +131,9 @@ smart_heating:
       temperature_sensors:
         - sensor.sensor_climate_office_temperature
       default_schedule: schedule_away_week
+      modes:
+        comfort: 20
+        eco: 18
       conditional_schedules:
         - type: input_select
           entity_id: input_select.heating_control
@@ -130,6 +142,7 @@ smart_heating:
             home_office: schedule_home_office
             family_away: schedule_away_week
     bedroom:
+      control: climate.bedroom
       thermostats:
         - entity_id: climate.bedroom_thermostat
           alpha: 1
@@ -138,7 +151,7 @@ smart_heating:
         - sensor.sensor_climate_bedroom_temperature
       default_schedule: schedule_default_bedroom
       modes:
-        comfort: 21
+        comfort: 20
         eco: 18
       conditional_schedules:
         - type: input_select

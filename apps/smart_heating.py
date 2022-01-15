@@ -156,6 +156,7 @@ class TemperatureSensor:
 class Room:
     hass: hass
     name: str
+    control_entity: str
     thermostats: list[Thermostat]
     modes: dict[str, float]    
     default_schedule: Schedule
@@ -173,6 +174,9 @@ class Room:
             entity = self.hass.get_entity(t.entity_id)
             entity.listen_state(self.on_preset_mode_change, attribute="preset_mode")
             entity.listen_state(self.on_thermostat_temperature_changed, attribute="current_temperature")
+
+        entity = self.hass.get_entity(self.control_entity)
+        entity.listen_state(self.on_target_temperature_change, attribute="temperature")
 
         for i in self.conditionals:
             entity_id = i.get("entity_id")
@@ -196,6 +200,11 @@ class Room:
         if new is not None:
             self.hass.log("room {} resetting mode to manual for thermostat {}".format(self.name, entity))
             self.update_thermostats(force=True)
+
+    def on_target_temperature_change(self, entity, attribute, old, new, kwargs):
+        mode = self.get_current_mode()
+        if new != self.modes[mode]:
+            self.set_target_temperature()
 
     def get_room_temperature(self):
         temps = list(filter(lambda x: x is not None, [y.last_temperature() for y in self.temperature_sensors]))
@@ -258,7 +267,7 @@ class Room:
             self._current_schedule = c_schedule
             self.cancel_scheduled_events()
             self.schedule_events()
-            self.publish_target_temperature()
+            self.set_target_temperature()
             return True
         return False
 
@@ -273,10 +282,10 @@ class Room:
         for t in self.thermostats:
             t.set_temperature(self.modes[mode], self.get_room_temperature(), force=force)
 
-    def publish_target_temperature(self, kwargs=None):
+    def set_target_temperature(self, kwargs=None):
         mode = self.get_current_mode()
-        self.hass.log("Room {} target temp published: {}".format(self.name, self.modes[mode]))
-        self.hass.set_state("sensor.target_temperature_" + self.name, state=self.modes[mode])
+        self.hass.log("Room {} target temp set: {}".format(self.name, self.modes[mode]))
+        self.hass.set_state(self.control_entity, temperature=self.modes[mode])
 
     def cancel_scheduled_events(self):
         self.hass.log("Cancelling schedule for room {}".format(self.name), level="DEBUG")
@@ -306,7 +315,7 @@ class Room:
 
     def set_mode_callback(self, kwargs):
         self.hass.log("Room {}: mode changed to {}".format(str(self.name), kwargs["setmode"]))
-        self.publish_target_temperature()
+        self.set_target_temperature()
         self.update_thermostats(add_offset_seconds=10)
 
     @classmethod
@@ -333,6 +342,7 @@ class Room:
         return cls(
             hass=hass,
             name=name,
+            control_entity=dct["control"],
             thermostats=[Thermostat(hass=hass, **e) for e in dct["thermostats"]],
             default_schedule=schedules[dct["default_schedule"]],
             modes=custom_modes,
