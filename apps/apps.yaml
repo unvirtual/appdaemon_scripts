@@ -79,6 +79,10 @@ smart_heating:
         weekdays: "1-5"  # Mon - Fri
         setmode: comfort
 
+  conditionals:
+    input_select.heating_control: 
+      type: input_select
+      default: automatic
   rooms:
     living:
       control: climate.living_room

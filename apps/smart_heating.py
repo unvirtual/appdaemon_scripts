@@ -1,7 +1,7 @@
 from attrs import define, field
 from typing import Optional, Union, Any
 from itertools import cycle
-from collections import deque
+from collections import deque, OrderedDict
 import copy
 import hassapi as hass
 import datetime
@@ -178,11 +178,6 @@ class Room:
         entity = self.hass.get_entity(self.control_entity)
         entity.listen_state(self.on_target_temperature_change, attribute="temperature")
 
-        for i in self.conditionals:
-            entity_id = i.get("entity_id")
-            entity = self.hass.get_entity(entity_id)
-            entity.listen_state(self.on_conditional_changed)
-
         self.update_schedule(force=True)
         self.update_thermostats(force=True)
 
@@ -234,8 +229,7 @@ class Room:
             self.update_thermostats()
 
     def on_conditional_changed(self, entity, attribute, old, new, kwargs):
-        self.hass.log("Room {}: condition {} changed from {} to {}".format(self.name, entity, old, new))
-        if new == old:
+        if entity not in self.conditionals and new == old:
             return
         updated = self.update_schedule()
         if updated:
@@ -357,10 +351,40 @@ class SmartHeating(hass.Hass):
         self.schedules = {}
         self.rooms = {}
         self.default_modes = self.args["default_modes"]
+        self.conditionals = self.args["conditionals"]
+        self.reset_handle = None
 
+        conds = []
         for k,v in self.args["schedules"].items():
             s = Schedule.from_list(k, v)
             self.schedules[s.name] = s
         for k,v in self.args["rooms"].items():
             r = Room.from_dict(self, k, v, self.default_modes, self.schedules)
             self.rooms[r.name] = r
+
+        for i in self.conditionals.keys():
+            self.log("App subscribing to {}".format(i))
+            entity = self.get_entity(i)
+            self.schedule_conditional_reset(i)
+            entity.listen_state(self.on_conditional_changed)
+
+    def on_conditional_changed(self, entity, attribute, old, new, kwargs):
+        self.log("condition {} changed from {} to {}".format(entity, old, new))
+        for r in self.rooms.values():
+            r.on_conditional_changed(entity, attribute, old, new, kwargs)
+        self.schedule_conditional_reset(entity)
+
+    def schedule_conditional_reset(self, entity):
+        state = self.get_state(entity)
+        self.log("Clearing conditional reset")
+        if self.reset_handle is not None:
+            self.cancel_timer(reset_handle)
+            self.reset_handle = None
+        if state != self.conditionals[entity]["default"]:
+            self.log("Scheduling conditional reset")
+            self.run_once(self.on_reset_conditional, "23:59:59", entity_id=entity)
+
+    def on_reset_conditional(self, kwargs):
+        c = self.conditionals[kwargs["entity_id"]]
+        if c["type"] == "input_select":
+            self.call_service("input_select/select_option", entity_id=kwargs["entity_id"], option=c["default"])
