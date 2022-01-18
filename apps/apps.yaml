@@ -1,3 +1,10 @@
+heating_control:
+  module: input_select
+  class: InputSelect
+  entity_id: input_select.heating_control 
+  default_value: automatic
+  default_reset_time: "23:59:59"
+
 smart_heating:
   module: smart_heating
   class: SmartHeating
@@ -79,10 +86,6 @@ smart_heating:
         weekdays: "1-5"  # Mon - Fri
         setmode: comfort
 
-  conditionals:
-    input_select.heating_control: 
-      type: input_select
-      default: automatic
   rooms:
     living:
       control: climate.living_room

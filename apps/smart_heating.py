@@ -344,47 +344,29 @@ class Room:
             conditionals=conditionals
         )
 
-
 class SmartHeating(hass.Hass):
     def initialize(self):
         self.log("SmartHeating started")
         self.schedules = {}
         self.rooms = {}
         self.default_modes = self.args["default_modes"]
-        self.conditionals = self.args["conditionals"]
         self.reset_handle = None
 
-        conds = []
+        conditionals = []
         for k,v in self.args["schedules"].items():
             s = Schedule.from_list(k, v)
             self.schedules[s.name] = s
         for k,v in self.args["rooms"].items():
             r = Room.from_dict(self, k, v, self.default_modes, self.schedules)
             self.rooms[r.name] = r
+            conditionals.extend([x["entity_id"] for x in r.conditionals])
 
-        for i in self.conditionals.keys():
+        for i in set(conditionals):
             self.log("App subscribing to {}".format(i))
             entity = self.get_entity(i)
-            self.schedule_conditional_reset(i)
             entity.listen_state(self.on_conditional_changed)
 
     def on_conditional_changed(self, entity, attribute, old, new, kwargs):
         self.log("condition {} changed from {} to {}".format(entity, old, new))
         for r in self.rooms.values():
             r.on_conditional_changed(entity, attribute, old, new, kwargs)
-        self.schedule_conditional_reset(entity)
-
-    def schedule_conditional_reset(self, entity):
-        state = self.get_state(entity)
-        self.log("Clearing conditional reset")
-        if self.reset_handle is not None:
-            self.cancel_timer(reset_handle)
-            self.reset_handle = None
-        if state != self.conditionals[entity]["default"]:
-            self.log("Scheduling conditional reset")
-            self.run_once(self.on_reset_conditional, "23:59:59", entity_id=entity)
-
-    def on_reset_conditional(self, kwargs):
-        c = self.conditionals[kwargs["entity_id"]]
-        if c["type"] == "input_select":
-            self.call_service("input_select/select_option", entity_id=kwargs["entity_id"], option=c["default"])
