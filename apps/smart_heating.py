@@ -63,8 +63,26 @@ class Schedule:
                 return i
         return None
 
+    def get_next_item_at(self, weekday, time):
+        for count, i in enumerate(self.items):
+            if i.start <= time and i.end > time and weekday in i.weekdays:
+                if count < len(self.items) - 1:
+                    return ("next", self.items[count+1])
+                elif count == len(self.items) - 1:
+                    return ("current", self.items[count])
+        
+        for w in range(weekday, weekday + 8):
+            ww = (w%8) + 1
+            for i in self.items:
+                if ww in i.weekdays:
+                    return ("next", i)
+        return None
+
     def get_item_at_datetime(self, dt):
         return self.get_item_at(dt.isoweekday(), dt.time())
+
+    def get_next_item_at_datetime(self, dt):
+        return self.get_next_item_at(dt.isoweekday(), dt.time())
 
 @define
 class Thermostat:
@@ -177,8 +195,10 @@ class Room:
 
         entity = self.hass.get_entity(self.control_entity)
         entity.listen_state(self.on_target_temperature_change, attribute="temperature")
+        entity.listen_state(self.on_climate_control_turn_off)
 
         self.update_schedule(force=True)
+        self.update_ha_sensor_state(self.get_scheduled_target_temperature())
 
         self.hass.log("==================== ")
         self.hass.log("Room {} initialized:".format(self.name))
@@ -196,7 +216,38 @@ class Room:
             self.update_thermostats(force=True)
 
     def on_target_temperature_change(self, entity, attribute, old, new, kwargs):
+        self.hass.log("room {} target temp changed".format(self.name))
+        if new == old:
+            return
         self.update_thermostats()
+        self.update_ha_sensor_state(new)
+
+    def on_climate_control_turn_off(self, entity, attribute, old, new, kwargs):
+        if new == old:
+            return
+        if new == "off":
+            self.hass.call_service("climate/turn_on", entity_id=self.control_entity)
+            self.hass.call_service("climate/set_temperature", entity_id=self.control_entity, temperature=self.get_scheduled_target_temperature())
+        
+    def update_ha_sensor_state(self, new_target_temp):
+        state = "automatic"
+        if self.get_scheduled_target_temperature() != new_target_temp:
+            state = "manual"
+        self.hass.log("room {} in {} mode".format(self.name, state))
+        now = self.hass.get_now()
+        next_schedule_item = self._current_schedule.get_next_item_at_datetime(now)
+
+        if next_schedule_item is None:
+            next_scheduled_change = None
+            next_scheduled_temp = None
+        elif next_schedule_item[0] == "next":
+            next_scheduled_change = next_schedule_item[1].start
+            next_scheduled_temp = self.modes[next_schedule_item[1].setmode]
+        elif next_schedule_item[0] == "current":
+            next_scheduled_change = next_schedule_item[1].end
+            next_scheduled_temp = self.modes[self.default_mode]
+
+        self.hass.set_state("sensor.climate_control_{}".format(self.name), state=state, next_time=next_scheduled_change, next_temp=next_scheduled_temp)
 
     def get_room_temperature(self):
         temps = list(filter(lambda x: x is not None, [y.last_temperature() for y in self.temperature_sensors]))
@@ -269,6 +320,10 @@ class Room:
     def set_current_target_temperature(self, value):
         self.hass.call_service("climate/set_temperature", entity_id=self.control_entity, temperature=value)
 
+    def get_scheduled_target_temperature(self, add_offset_seconds=0):
+        mode = self.get_current_mode(add_offset_seconds)
+        return self.modes[mode]
+
     def update_thermostats(self, add_offset_seconds=0, force=False):
         room_temp = self.get_room_temperature()
         target_temp = self.get_current_target_temperature()
@@ -276,9 +331,9 @@ class Room:
             t.set_temperature(target_temp, room_temp, force=force)
 
     def set_target_temperature_from_schedule(self, add_offset_seconds=0, kwargs=None):
-        mode = self.get_current_mode(add_offset_seconds)
-        self.hass.log("Room {} target temp set: {}".format(self.name, self.modes[mode]))
-        self.set_current_target_temperature(self.modes[mode])
+        sched_temperature = self.get_scheduled_target_temperature(add_offset_seconds=add_offset_seconds)
+        self.hass.log("Room {} target temp set: {}".format(self.name, sched_temperature))
+        self.set_current_target_temperature(sched_temperature)
 
     def cancel_scheduled_events(self):
         self.hass.log("Cancelling schedule for room {}".format(self.name), level="DEBUG")
