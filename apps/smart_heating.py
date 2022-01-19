@@ -179,7 +179,6 @@ class Room:
         entity.listen_state(self.on_target_temperature_change, attribute="temperature")
 
         self.update_schedule(force=True)
-        self.update_thermostats(force=True)
 
         self.hass.log("==================== ")
         self.hass.log("Room {} initialized:".format(self.name))
@@ -197,9 +196,7 @@ class Room:
             self.update_thermostats(force=True)
 
     def on_target_temperature_change(self, entity, attribute, old, new, kwargs):
-        mode = self.get_current_mode()
-        if new != self.modes[mode]:
-            self.set_target_temperature()
+        self.update_thermostats()
 
     def get_room_temperature(self):
         temps = list(filter(lambda x: x is not None, [y.last_temperature() for y in self.temperature_sensors]))
@@ -231,12 +228,7 @@ class Room:
     def on_conditional_changed(self, entity, attribute, old, new, kwargs):
         if entity not in self.conditionals and new == old:
             return
-        updated = self.update_schedule()
-        if updated:
-            self.hass.log("Room {}: condition change triggered new schedule {}".format(self.name, self._current_schedule.name))
-            self.update_thermostats(add_offset_seconds=10)
-        else:
-            self.hass.log("Room {}: condition change without schedule change".format(self.name))
+        self.update_schedule()
 
     def get_conditional_state(self):
         res = []
@@ -261,7 +253,7 @@ class Room:
             self._current_schedule = c_schedule
             self.cancel_scheduled_events()
             self.schedule_events()
-            self.set_target_temperature()
+            self.set_target_temperature_from_schedule()
             return True
         return False
 
@@ -271,15 +263,22 @@ class Room:
         )
         return scheduled.setmode if scheduled is not None else DEFAULT_SETMODE
 
-    def update_thermostats(self, add_offset_seconds=0, force=False):
-        mode = self.get_current_mode(add_offset_seconds)
-        for t in self.thermostats:
-            t.set_temperature(self.modes[mode], self.get_room_temperature(), force=force)
+    def get_current_target_temperature(self):
+        return self.hass.get_state(self.control_entity, attribute="temperature")
 
-    def set_target_temperature(self, kwargs=None):
-        mode = self.get_current_mode()
+    def set_current_target_temperature(self, value):
+        self.hass.call_service("climate/set_temperature", entity_id=self.control_entity, temperature=value)
+
+    def update_thermostats(self, add_offset_seconds=0, force=False):
+        room_temp = self.get_room_temperature()
+        target_temp = self.get_current_target_temperature()
+        for t in self.thermostats:
+            t.set_temperature(target_temp, room_temp, force=force)
+
+    def set_target_temperature_from_schedule(self, add_offset_seconds=0, kwargs=None):
+        mode = self.get_current_mode(add_offset_seconds)
         self.hass.log("Room {} target temp set: {}".format(self.name, self.modes[mode]))
-        self.hass.set_state(self.control_entity, temperature=self.modes[mode])
+        self.set_current_target_temperature(self.modes[mode])
 
     def cancel_scheduled_events(self):
         self.hass.log("Cancelling schedule for room {}".format(self.name), level="DEBUG")
@@ -309,8 +308,7 @@ class Room:
 
     def set_mode_callback(self, kwargs):
         self.hass.log("Room {}: mode changed to {}".format(str(self.name), kwargs["setmode"]))
-        self.set_target_temperature()
-        self.update_thermostats(add_offset_seconds=10)
+        self.set_target_temperature_from_schedule(add_offset_seconds=10)
 
     @classmethod
     def replace_conditional_schedules(cls, conditionals, schedules):
