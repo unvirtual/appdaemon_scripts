@@ -171,85 +171,44 @@ class TemperatureSensor:
         return cls(hass=hass, entity_id=entity_id)
 
 @define
-class Room:
+class RoomThermostat:
     hass: hass
     name: str
-    control_entity: str
+    entity: str
+    auto_target_temp: float
+    manual: bool
     thermostats: list[Thermostat]
-    modes: dict[str, float]    
-    default_schedule: Schedule
     temperature_sensors: list[TemperatureSensor]
-    handles: list[Any] = field(default=[])
-    overrides: list[str] = field(default=[])
-    conditionals: list[Any] = field(default=[])
-    default_mode: str = field(default="eco")
-    _current_schedule: Schedule = field(init=False)
 
     def __attrs_post_init__(self):
-        self._current_schedule = self.default_schedule
-        self.hass.listen_event(self.on_sensor_temperature_changed, TEMPERATURE_SENSOR_UPDATED)
+        self.hass.listen_event(self._on_sensor_temperature_changed, TEMPERATURE_SENSOR_UPDATED)
         for t in self.thermostats:
             entity = self.hass.get_entity(t.entity_id)
-            entity.listen_state(self.on_preset_mode_change, attribute="preset_mode")
-            entity.listen_state(self.on_thermostat_temperature_changed, attribute="current_temperature")
+            entity.listen_state(self._on_thermostat_temperature_changed, attribute="current_temperature")
 
-        entity = self.hass.get_entity(self.control_entity)
-        entity.listen_state(self.on_target_temperature_change, attribute="temperature")
-        entity.listen_state(self.on_climate_control_turn_off)
+        entity = self.hass.get_entity(self.entity)
+        entity.listen_state(self._on_target_temperature_changed, attribute="temperature")
+        entity.listen_state(self._on_turn_off)
 
-        self.update_schedule(force=True)
-        self.update_ha_sensor_state(self.get_scheduled_target_temperature())
+    def is_manual():
+        return self.manual
 
-        self.hass.log("==================== ")
-        self.hass.log("Room {} initialized:".format(self.name))
-        self.hass.log("  current room temperature: {}".format(self.get_room_temperature()))
-        self.hass.log("  current schedule:         {}".format(self._current_schedule.name))
-        self.hass.log("  current mode:             {}".format(self.get_current_mode()))
-        self.hass.log("  modes:                    {}".format(self.modes))
-        self.hass.log("==================== ")
+    def get_auto_target_temperature(self):
+        return self.auto_target_temp
 
-    def on_preset_mode_change(self, entity, attribute, old, new, kwargs):
-        if entity not in [x.entity_id for x in self.thermostats]:
-            return
-        if new is not None:
-            self.hass.log("room {} resetting mode to manual for thermostat {}".format(self.name, entity))
-            self.update_thermostats(force=True)
+    def set_auto_target_temperature(self, value):
+        self.hass.log("{} setting auto target temp to {}".format(self.name, self.auto_target_temp))
+        self.auto_target_temp = value
 
-    def on_target_temperature_change(self, entity, attribute, old, new, kwargs):
-        self.hass.log("room {} target temp changed".format(self.name))
-        if new == old:
-            return
-        self.update_thermostats()
-        self.update_ha_sensor_state(new)
+    def get_target_temperature(self):
+        return self.hass.get_state(self.entity, attribute="temperature")
 
-    def on_climate_control_turn_off(self, entity, attribute, old, new, kwargs):
-        if new == old:
-            return
-        if new == "off":
-            self.hass.call_service("climate/turn_on", entity_id=self.control_entity)
-            self.hass.call_service("climate/set_temperature", entity_id=self.control_entity, temperature=self.get_scheduled_target_temperature())
-        
-    def update_ha_sensor_state(self, new_target_temp):
-        state = "automatic"
-        if self.get_scheduled_target_temperature() != new_target_temp:
-            state = "manual"
-        self.hass.log("room {} in {} mode".format(self.name, state))
-        now = self.hass.get_now()
-        next_schedule_item = self._current_schedule.get_next_item_at_datetime(now)
+    def reset_to_auto(self):
+        self.hass.log("{} resetting to auto".format(self.name))
+        if self.auto_target_temp is not None:
+            self._set_target_temperature(self.auto_target_temp)
 
-        if next_schedule_item is None:
-            next_scheduled_change = None
-            next_scheduled_temp = None
-        elif next_schedule_item[0] == "next":
-            next_scheduled_change = next_schedule_item[1].start
-            next_scheduled_temp = self.modes[next_schedule_item[1].setmode]
-        elif next_schedule_item[0] == "current":
-            next_scheduled_change = next_schedule_item[1].end
-            next_scheduled_temp = self.modes[self.default_mode]
-
-        self.hass.set_state("sensor.climate_control_{}".format(self.name), state=state, next_time=next_scheduled_change, next_temp=next_scheduled_temp)
-
-    def get_room_temperature(self):
+    def measure_temperature(self):
         temps = list(filter(lambda x: x is not None, [y.last_temperature() for y in self.temperature_sensors]))
         if len(temps) == 0:
             self.hass.log(
@@ -266,15 +225,106 @@ class Room:
         else:
             return sum(temps)/len(temps)
 
-    def on_sensor_temperature_changed(self, event_name, data, kwargs):
+    def _set_target_temperature(self, value):
+        self.hass.call_service("climate/set_temperature", entity_id=self.entity, temperature=value)
+
+    def _update_thermostats(self, add_offset_seconds=0, force=False):
+        room_temp = self.measure_temperature()
+        target_temp = self.get_target_temperature()
+        for t in self.thermostats:
+            t.set_temperature(target_temp, room_temp, force=force)
+
+    def _on_sensor_temperature_changed(self, event_name, data, kwargs):
         if data["entity_id"] in [x.entity_id for x in self.temperature_sensors]:
             self.hass.log("Room {} on_sensor_temperature_changed() updates thermostats", level="DEBUG")
-            self.update_thermostats()
+            self._update_thermostats()
 
-    def on_thermostat_temperature_changed(self, entity, attribute, old, new, kwargs):
+    def _on_thermostat_temperature_changed(self, entity, attribute, old, new, kwargs):
         if entity in [x.entity_id for x in self.thermostats]:
             self.hass.log("Room {} on_thermostat_temperature_changed() updates thermostats", level="DEBUG")
-            self.update_thermostats()
+            self._update_thermostats()
+
+    def _on_target_temperature_changed(self, entity, attribute, old, new, kwargs):
+        self.hass.log("{} _on_target_temperature_changed. new: {}, old: {}".format(self.name, new, old))
+        if new == old:
+            return
+        self.manual = new != self.auto_target_temp
+        self.hass.log("{} manual mode: {}".format(self.name, self.manual))
+        self._update_thermostats()
+        self._publish_auto_state()
+
+    def _on_turn_off(self, entity, attribute, old, new, kwargs):
+        self.hass.log("{} _on_turn_off".format(self.name))
+        if new == old:
+            return
+        if new == "off":
+            self.reset_to_auto()
+            self.hass.call_service("climate/turn_on", entity_id=self.entity)
+
+    def _publish_auto_state(self):
+        self.hass.set_state("sensor.roomthermostat_manual_mode_{}".format(self.name), state=self.manual)
+
+    @classmethod
+    def from_dict(cls, hass, dct, name, auto_target_temp, manual):
+        return cls(
+            hass=hass,
+            name="room_thermostat_{}".format(name),
+            entity=dct["control"],
+            auto_target_temp=auto_target_temp,
+            manual=manual,
+            thermostats=[Thermostat(hass=hass, **e) for e in dct["thermostats"]],
+            temperature_sensors=[TemperatureSensor.create(hass, e) for e in dct["temperature_sensors"]]
+        )
+
+@define
+class Room:
+    hass: hass
+    name: str
+    room_thermostat: RoomThermostat
+    modes: dict[str, float]    
+    default_schedule: Schedule
+    handles: list[Any] = field(default=[])
+    conditionals: list[Any] = field(default=[])
+    default_mode: str = field(default="eco")
+    _current_schedule: Schedule = field(init=False)
+
+    def __attrs_post_init__(self):
+        self._current_schedule = self.default_schedule
+
+        self.update_schedule(force=True)
+        self.update_ha_sensor_state(self.get_scheduled_target_temperature())
+
+        self.hass.log("==================== ")
+        self.hass.log("Room {} initialized:".format(self.name))
+        self.hass.log("  current room temperature: {}".format(self.get_room_temperature()))
+        self.hass.log("  current schedule:         {}".format(self._current_schedule.name))
+        self.hass.log("  current mode:             {}".format(self.get_current_mode()))
+        self.hass.log("  modes:                    {}".format(self.modes))
+        self.hass.log("==================== ")
+
+    def update_ha_sensor_state(self, new_target_temp):
+        pass
+        # state = "automatic"
+        # if self.get_scheduled_target_temperature() != new_target_temp:
+        #     state = "manual"
+        # self.hass.log("room {} in {} mode".format(self.name, state))
+        # now = self.hass.get_now()
+        # next_schedule_item = self._current_schedule.get_next_item_at_datetime(now)
+
+        # if next_schedule_item is None:
+        #     next_scheduled_change = None
+        #     next_scheduled_temp = None
+        # elif next_schedule_item[0] == "next":
+        #     next_scheduled_change = next_schedule_item[1].start
+        #     next_scheduled_temp = self.modes[next_schedule_item[1].setmode]
+        # elif next_schedule_item[0] == "current":
+        #     next_scheduled_change = next_schedule_item[1].end
+        #     next_scheduled_temp = self.modes[self.default_mode]
+
+        # self.hass.set_state("sensor.climate_control_{}".format(self.name), state=state, next_time=next_scheduled_change, next_temp=next_scheduled_temp)
+
+    def get_room_temperature(self):
+        return self.room_thermostat.measure_temperature()
 
     def on_conditional_changed(self, entity, attribute, old, new, kwargs):
         if entity not in self.conditionals and new == old:
@@ -314,26 +364,15 @@ class Room:
         )
         return scheduled.setmode if scheduled is not None else DEFAULT_SETMODE
 
-    def get_current_target_temperature(self):
-        return self.hass.get_state(self.control_entity, attribute="temperature")
-
-    def set_current_target_temperature(self, value):
-        self.hass.call_service("climate/set_temperature", entity_id=self.control_entity, temperature=value)
-
     def get_scheduled_target_temperature(self, add_offset_seconds=0):
         mode = self.get_current_mode(add_offset_seconds)
         return self.modes[mode]
 
-    def update_thermostats(self, add_offset_seconds=0, force=False):
-        room_temp = self.get_room_temperature()
-        target_temp = self.get_current_target_temperature()
-        for t in self.thermostats:
-            t.set_temperature(target_temp, room_temp, force=force)
-
     def set_target_temperature_from_schedule(self, add_offset_seconds=0, kwargs=None):
         sched_temperature = self.get_scheduled_target_temperature(add_offset_seconds=add_offset_seconds)
         self.hass.log("Room {} target temp set: {}".format(self.name, sched_temperature))
-        self.set_current_target_temperature(sched_temperature)
+        self.room_thermostat.set_auto_target_temperature(sched_temperature)
+        self.room_thermostat.reset_to_auto()
 
     def cancel_scheduled_events(self):
         self.hass.log("Cancelling schedule for room {}".format(self.name), level="DEBUG")
@@ -385,15 +424,14 @@ class Room:
         conditionals = dct.get("conditional_schedules") or []
         conditionals = cls.replace_conditional_schedules(conditionals, schedules)
         custom_modes = cls.merge_modes(default_modes, dct.get("modes") or {})
+        auto_target_temp = custom_modes[DEFAULT_SETMODE]
 
         return cls(
             hass=hass,
             name=name,
-            control_entity=dct["control"],
-            thermostats=[Thermostat(hass=hass, **e) for e in dct["thermostats"]],
+            room_thermostat=RoomThermostat.from_dict(hass, dct, name=name, auto_target_temp=auto_target_temp, manual=False),
             default_schedule=schedules[dct["default_schedule"]],
             modes=custom_modes,
-            temperature_sensors=[TemperatureSensor.create(hass, e) for e in dct["temperature_sensors"]] ,
             conditionals=conditionals
         )
 
