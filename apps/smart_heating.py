@@ -208,8 +208,8 @@ class RoomThermostat:
         return self.auto_target_temp
 
     def set_auto_target_temperature(self, value):
-        self.hass.log("{} setting auto target temp to {}".format(self.name, self.auto_target_temp))
         self.auto_target_temp = value
+        self.hass.log("{} setting auto target temp to {}".format(self.name, self.auto_target_temp))
 
     def get_target_temperature(self):
         return self.hass.get_state(self.entity, attribute="temperature")
