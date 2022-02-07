@@ -72,17 +72,17 @@ smart_heating:
         end: "22:30"
         weekdays: "1-5"  # Mon - Fri
         setmode: comfort
-          #      - start: "07:00"
-          #        end: "23:30"
-          #        weekdays: "6"  # Sat
-          #        setmode: comfort
-          #      - start: "07:00"
-          #        end: "22:30"
-          #        weekdays: "7"  # Sun
-          #        setmode: comfort
+      - start: "07:00"
+        end: "23:30"
+        weekdays: "6"  # Sat
+        setmode: comfort
+      - start: "07:00"
+        end: "22:30"
+        weekdays: "7"  # Sun
+        setmode: comfort
     schedule_home_office:
       - start: "06:30"
-        end: "18:30"
+        end: "22:30"
         weekdays: "1-5"  # Mon - Fri
         setmode: comfort
 
@@ -139,7 +139,7 @@ smart_heating:
         - sensor.sensor_climate_office_temperature
       default_schedule: schedule_away_week
       modes:
-        comfort: 20
+        comfort: 20.5
         eco: 18
       conditional_schedules:
         - type: input_select
