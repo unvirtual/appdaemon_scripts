@@ -2,6 +2,8 @@ battery_check:
   module: battery_check
   class: BatteryCheck
   threshold: 25
+  friendly_name_blacklist:
+    - Smartphone
 
 climate_sensor_health_living:
   module: sensor_health

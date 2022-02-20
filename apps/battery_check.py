@@ -30,7 +30,11 @@ class BatteryCheck(hass.Hass):
                 except TypeError:
                     friendly_name = self.get_state(device, attribute="friendly_name")
 
-                if "Smartphone" in friendly_name:
+                blacklisted = False
+                for skip in self.args["friendly_name_blacklist"]:
+                    if skip in friendly_name:
+                        blacklisted = True
+                if blacklisted:
                     continue
 
                 if battery < float(self.args["threshold"]):
