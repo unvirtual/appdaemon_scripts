@@ -1,3 +1,8 @@
+battery_check:
+  module: battery_check
+  class: BatteryCheck
+  threshold: 25
+
 heating_control:
   module: input_select
   class: InputSelect
