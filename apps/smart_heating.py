@@ -123,11 +123,11 @@ class Thermostat:
         current_setting = self.get_temperature_setting()
 
         if force or new_temperature != current_setting:
-            self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force))
+            self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force), level="DEBUG")
             self.hass.call_service("climate/set_temperature", entity_id=self.entity_id, temperature=new_temperature)
         else:
-            self.hass.log("[Thermostat] {}: No setting change (setting: {}, target: {})".format(self.entity_id, current_setting, target_temperature))
-        self.hass.log("[Thermostat] {}: temp delta (power output) {} (room temp: {}, new temp: {}, thermostat temp: {})".format(self.entity_id, new_temperature - current_measurement, current_temperature, new_temperature, current_measurement))
+            self.hass.log("[Thermostat] {}: No setting change (setting: {}, target: {})".format(self.entity_id, current_setting, target_temperature), level="DEBUG")
+        self.hass.log("[Thermostat] {}: temp delta (power output) {} (room temp: {}, new temp: {}, thermostat temp: {})".format(self.entity_id, new_temperature - current_measurement, current_temperature, new_temperature, current_measurement), level="DEBUG")
 
 @define
 class Selector:
@@ -168,7 +168,7 @@ class TemperatureSensor:
             return None
 
     def on_change(self, entity, attribute, old, new, kwargs):
-        self.hass.log("[TempSensor] {} temperature {} -> {}".format(self.entity_id, old, new))
+        self.hass.log("[TempSensor] {} temperature {} -> {}".format(self.entity_id, old, new), level="DEBUG")
         new_temp = self._valid_temperature_or_none(new)
         changed_from_to_none = new_temp != self.last_value and (new_temp is None or self.last_value is None) 
         if changed_from_to_none or abs(new_temp - self.last_value) > self.threshold:
@@ -209,13 +209,13 @@ class RoomThermostat:
 
     def set_auto_target_temperature(self, value):
         self.auto_target_temp = value
-        self.hass.log("{} setting auto target temp to {}".format(self.name, self.auto_target_temp))
+        self.hass.log("{} setting auto target temp to {}".format(self.name, self.auto_target_temp), level="DEBUG")
 
     def get_target_temperature(self):
         return self.hass.get_state(self.entity, attribute="temperature")
 
     def reset_to_auto(self):
-        self.hass.log("{} resetting to auto".format(self.name))
+        self.hass.log("{} resetting to auto".format(self.name), level="DEBUG")
         if self.auto_target_temp is not None:
             self._set_target_temperature(self.auto_target_temp)
 
@@ -256,16 +256,16 @@ class RoomThermostat:
             self._update_thermostats()
 
     def _on_target_temperature_changed(self, entity, attribute, old, new, kwargs):
-        self.hass.log("{} _on_target_temperature_changed. new: {}, old: {}".format(self.name, new, old))
+        self.hass.log("{} _on_target_temperature_changed. new: {}, old: {}".format(self.name, new, old), level="DEBUG")
         if new == old:
             return
         self.manual = new != self.auto_target_temp
-        self.hass.log("{} manual mode: {}".format(self.name, self.manual))
+        self.hass.log("{} manual mode: {}".format(self.name, self.manual), level="DEBUG")
         self._update_thermostats()
         self._publish_auto_state()
 
     def _on_turn_off(self, entity, attribute, old, new, kwargs):
-        self.hass.log("{} _on_turn_off".format(self.name))
+        self.hass.log("{} _on_turn_off".format(self.name), level="DEBUG")
         if new == old:
             return
         if new == "off":
