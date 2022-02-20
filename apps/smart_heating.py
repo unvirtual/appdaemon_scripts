@@ -256,11 +256,11 @@ class RoomThermostat:
             self._update_thermostats()
 
     def _on_target_temperature_changed(self, entity, attribute, old, new, kwargs):
-        self.hass.log("{} _on_target_temperature_changed. new: {}, old: {}".format(self.name, new, old), level="DEBUG")
+        self.hass.log("{} _on_target_temperature_changed. new: {}, old: {}".format(self.name, new, old))
         if new == old:
             return
         self.manual = new != self.auto_target_temp
-        self.hass.log("{} manual mode: {}".format(self.name, self.manual), level="DEBUG")
+        self.hass.log("{} manual mode: {}".format(self.name, self.manual))
         self._update_thermostats()
         self._publish_auto_state()
 
