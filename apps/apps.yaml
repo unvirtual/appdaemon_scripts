@@ -3,6 +3,41 @@ battery_check:
   class: BatteryCheck
   threshold: 25
 
+climate_sensor_health_living:
+  module: sensor_health
+  class: SensorHealth
+  interval_seconds: 7200
+  timeout_seconds: 3600
+  entity_id: sensor.sensor_climate_living_room_temperature
+
+climate_sensor_health_childroom:
+  module: sensor_health
+  class: SensorHealth
+  interval_seconds: 7200
+  timeout_seconds: 3600
+  entity_id: sensor.sensor_climate_childroom_temperature
+
+climate_sensor_health_bathroom:
+  module: sensor_health
+  class: SensorHealth
+  interval_seconds: 7200
+  timeout_seconds: 3600
+  entity_id: sensor.sensor_climate_bathroom_temperature
+
+climate_sensor_health_bedroom:
+  module: sensor_health
+  class: SensorHealth
+  interval_seconds: 7200
+  timeout_seconds: 3600
+  entity_id: sensor.sensor_climate_bedroom_temperature
+
+climate_sensor_health_office:
+  module: sensor_health
+  class: SensorHealth
+  interval_seconds: 7200
+  timeout_seconds: 3600
+  entity_id: sensor.sensor_climate_office_temperature
+
 heating_control:
   module: input_select
   class: InputSelect
