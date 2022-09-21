@@ -102,6 +102,7 @@ class Thermostat:
     offset: float = field(default=0.)
 
     MAX_TEMP_SETTING = 28.0
+    MIN_TEMP_SETTING = 17.0
 
     def get_temperature_setting(self):
         entity = self.hass.get_entity(self.entity_id)
@@ -119,6 +120,8 @@ class Thermostat:
         if delta > 0:
             new_temperature = round((current_measurement + self.alpha*delta + self.offset)*2.)/2.
             new_temperature = min(max(new_temperature, target_temperature), Thermostat.MAX_TEMP_SETTING)
+        else:
+            new_temperature = Thermostat.MIN_TEMP_SETTING
 
         current_setting = self.get_temperature_setting()
 
