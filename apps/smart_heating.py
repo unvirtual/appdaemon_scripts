@@ -118,7 +118,7 @@ class Thermostat:
 
         current_measurement = self.get_measured_temperature()
         if delta > 0:
-            new_temperature = round((current_measurement + self.alpha*delta + self.offset)*2.)/2.
+            new_temperature = round((target_temperature + self.alpha*delta + self.offset)*2.)/2.
             new_temperature = min(max(new_temperature, target_temperature), Thermostat.MAX_TEMP_SETTING)
         else:
             new_temperature = Thermostat.MIN_TEMP_SETTING
@@ -127,7 +127,8 @@ class Thermostat:
 
         if force or new_temperature != current_setting:
             self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force), level="DEBUG")
-            self.hass.call_service("climate/set_temperature", entity_id=self.entity_id, temperature=new_temperature)
+            entity = self.get_entity(self.entity_id)
+            entity.call_service("set_temperature", temperature=new_temperature)
         else:
             self.hass.log("[Thermostat] {}: No setting change (setting: {}, target: {})".format(self.entity_id, current_setting, target_temperature), level="DEBUG")
         self.hass.log("[Thermostat] {}: temp delta (power output) {} (room temp: {}, new temp: {}, thermostat temp: {})".format(self.entity_id, new_temperature - current_measurement, current_temperature, new_temperature, current_measurement), level="DEBUG")
@@ -240,7 +241,8 @@ class RoomThermostat:
             return sum(temps)/len(temps)
 
     def _set_target_temperature(self, value):
-        self.hass.call_service("climate/set_temperature", entity_id=self.entity, temperature=value)
+        entity = self.hass.get_entity(self.entity)
+        entity.call_service("set_temperature", temperature=value)
 
     def _update_thermostats(self, add_offset_seconds=0, force=False):
         room_temp = self.measure_temperature()
@@ -273,10 +275,11 @@ class RoomThermostat:
             return
         if new == "off":
             self.reset_to_auto()
-            self.hass.call_service("climate/turn_on", entity_id=self.entity)
+            entity = self.hass.get_entity(self.entity)
+            entity.turn_on()
 
     def _publish_auto_state(self):
-        self.hass.set_state("sensor.{}_manual_mode".format(self.name), state=self.manual)
+        self.hass.set_state("sensor.{}_manual_mode".format(self.name), state=str(self.manual))
 
     @classmethod
     def from_dict(cls, hass, dct, name, auto_target_temp, manual):
