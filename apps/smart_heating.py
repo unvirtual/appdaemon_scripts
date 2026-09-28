@@ -118,7 +118,7 @@ class Thermostat:
 
         current_measurement = self.get_measured_temperature()
         if delta > 0:
-            new_temperature = round((target_temperature + self.alpha*delta + self.offset)*2.)/2.
+            new_temperature = round((current_measurement + self.alpha*delta + self.offset)*2.)/2.
             new_temperature = min(max(new_temperature, target_temperature), Thermostat.MAX_TEMP_SETTING)
         else:
             new_temperature = Thermostat.MIN_TEMP_SETTING
@@ -127,7 +127,7 @@ class Thermostat:
 
         if force or new_temperature != current_setting:
             self.hass.log("[Thermostat] {} setting {} -> {} (target: {}, alpha: {}, forced: {})".format(self.entity_id, current_setting, new_temperature, target_temperature, self.alpha, force), level="DEBUG")
-            entity = self.get_entity(self.entity_id)
+            entity = self.hass.get_entity(self.entity_id)
             entity.call_service("set_temperature", temperature=new_temperature)
         else:
             self.hass.log("[Thermostat] {}: No setting change (setting: {}, target: {})".format(self.entity_id, current_setting, target_temperature), level="DEBUG")
