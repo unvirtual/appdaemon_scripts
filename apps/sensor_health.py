@@ -13,13 +13,12 @@ class SensorHealth(hass.Hass):
             self.log("WARNING: sensor {} timed out. Last measurement more then {} ago, threshold {} seconds".format(self.args["entity_id"], self.args["interval_seconds"], self.args["timeout_seconds"]), level="WARNING")
             return
 
-        last_event = history[-1]
-        last_changed = self.convert_utc(last_event["last_changed"])
+        last_changed = history[-1]["last_changed"]
 
         delta = self.get_now() - last_changed
         self.log("Check {}: last read {} seconds ago".format(self.args["entity_id"], int(delta.total_seconds())))
         if delta.total_seconds() > self.args["timeout_seconds"]:
-            message = "sensor {} timed out. Last measurement at {} ({} seconds ago), threshold {} seconds".format(self.args["entity_id"], last_event["last_changed"], int(delta.total_seconds()), self.args["timeout_seconds"])
+            message = "sensor {} timed out. Last measurement at {} ({} seconds ago), threshold {} seconds".format(self.args["entity_id"], last_changed, int(delta.total_seconds()), self.args["timeout_seconds"])
             self.log("WARNING: " + message, level="WARNING")
             self.call_service('notify/notify', title="WARNING: sensor timed out", message=message)
             self.call_service('persistent_notification/create', title="WARNING: sensor timed out", message=message)
